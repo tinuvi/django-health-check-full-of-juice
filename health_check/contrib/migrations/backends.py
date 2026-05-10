@@ -7,7 +7,7 @@ from django.db.migrations.executor import MigrationExecutor
 from health_check.backends import BaseHealthCheckBackend
 from health_check.exceptions import ServiceUnavailable
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger("django_health_check_full_of_juice")
 
 
 class MigrationsHealthCheck(BaseHealthCheckBackend):

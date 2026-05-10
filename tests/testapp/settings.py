@@ -27,13 +27,22 @@ INSTALLED_APPS = (
     "health_check.db",
     "health_check.storage",
     "health_check.contrib.celery",
-    "health_check.contrib.migrations",
+    "health_check.contrib.celery_heartbeat",
     "health_check.contrib.celery_ping",
-    "health_check.contrib.s3boto_storage",
     "health_check.contrib.db_heartbeat",
-    "health_check.contrib.mail",
+    "health_check.contrib.django_q",
+    "health_check.contrib.migrations",
+    "health_check.contrib.s3boto_storage",
     "tests",
 )
+
+Q_CLUSTER = {
+    "name": "test-cluster",
+    "workers": 1,
+    "timeout": 60,
+    "retry": 90,
+    "orm": "default",
+}
 
 MIDDLEWARE_CLASSES = (
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -61,6 +70,9 @@ TEMPLATES = [
 SECRET_KEY = uuid.uuid4().hex
 
 USE_TZ = True
+
+TEST_OUTPUT_DIR = os.path.join(BASE_DIR, "..", "..", "tests-reports")
+TEST_OUTPUT_FILE_NAME = "junit.xml"
 
 CELERY_QUEUES = [
     Queue("default"),

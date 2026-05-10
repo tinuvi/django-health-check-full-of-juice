@@ -1,27 +1,27 @@
+from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-import pytest
+from django.test import TestCase as DjangoTestCase
 
 from health_check.contrib.db_heartbeat.backends import DatabaseHeartBeatCheck, SelectOne
 from health_check.exceptions import ServiceUnavailable
 
 
-class TestSelectOne:
+class TestSelectOne(TestCase):
     def test_as_sql(self):
         select_one = SelectOne()
         sql, params = select_one.as_sql(None, None)
-        assert sql == "SELECT 1"
-        assert not params
+        self.assertEqual(sql, "SELECT 1")
+        self.assertFalse(params)
 
     def test_as_oracle(self):
         select_one = SelectOne()
         sql, params = select_one.as_oracle(None, None)
-        assert sql == "SELECT 1 FROM DUAL"
-        assert not params
+        self.assertEqual(sql, "SELECT 1 FROM DUAL")
+        self.assertFalse(params)
 
 
-class TestDatabaseHeartBeatCheck:
-    @pytest.mark.django_db
+class TestDatabaseHeartBeatCheck(DjangoTestCase):
     def test_check_status__success(self):
         health_check = DatabaseHeartBeatCheck()
         health_check.check_status()
@@ -36,12 +36,12 @@ class TestDatabaseHeartBeatCheck:
         try:
             health_check.check_status()
         except Exception as e:
-            pytest.fail(f"check_status() raised an exception unexpectedly: {e}")
+            self.fail(f"check_status() raised an exception unexpectedly: {e}")
 
     @patch("health_check.contrib.db_heartbeat.backends.connection")
     def test_check_status_service_unavailable(self, mock_connection):
         mock_connection.cursor.side_effect = Exception("Database error")
 
         health_check = DatabaseHeartBeatCheck()
-        with pytest.raises(ServiceUnavailable):
+        with self.assertRaises(ServiceUnavailable):
             health_check.check_status()

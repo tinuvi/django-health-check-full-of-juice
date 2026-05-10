@@ -1,0 +1,34 @@
+# Changelog
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.0] - 2026-05-10
+
+### Added
+- Initial release as `django-health-check-full-of-juice`, an opinionated fork of [`django-health-check`](https://github.com/codingjoe/django-health-check) 3.20.8.
+- `health_check.conf.get_setting(name, default_value=None)` helper that reads `settings.HEALTH_CHECK` lazily — values changed via `django.test.override_settings` (or any runtime mutation) are honored on each check. Resolution order: `settings.HEALTH_CHECK[name]` → `_DEFAULTS[name]` → `default_value`. Contrib backends own their own defaults and pass them at the call site (`get_setting("MY_KEY", default)`); `_DEFAULTS` carries core keys only.
+- `health_check.middleware.LivenessMiddleware`: short-circuits a configurable liveness probe path with `200 {"status": "ok"}` before any other middleware or integration runs. Configured via the new `HEALTH_CHECK["LIVENESS_PATH"]` setting (default: `/healthcheck/liveness`). Sync only.
+- Django system check `health_check.W001`: warns at `manage.py check` time if `LivenessMiddleware` is in `MIDDLEWARE` but not at index 0.
+- `health_check.contrib.django_q` app with two backends that read the `Stat` heartbeat the Django-Q sentinel publishes to its broker: `DjangoQClusterHealthCheck` (fleet view, intended for the web tier's `integrations` subset) and `DjangoQLocalHealthCheck` (current-host view, intended for the worker pod's `liveness` subset). Configured via `HEALTH_CHECK["DJANGO_Q_CLUSTER_NAME"]` (default: `Q_CLUSTER["name"]`) and `HEALTH_CHECK["DJANGO_Q_UNHEALTHY_STATUSES"]` (default: `{"Stopping", "Stopped"}`). Adds `django-q2` as a dependency.
+- `health_check.contrib.celery_heartbeat` app with `CeleryHeartbeatHealthCheck` backend and a Celery `LivenessProbe` bootstep. The bootstep touches a heartbeat file on a timer from inside the worker process; the backend asserts the file's mtime is fresh. Broker-independent, pod-local — suitable for a Celery worker `livenessProbe`. Configured via `HEALTH_CHECK["CELERY_HEARTBEAT_FILE"]` (default: `/tmp/celery_worker_heartbeat`), `HEALTH_CHECK["CELERY_HEARTBEAT_INTERVAL"]` (default: `1.0`), and `HEALTH_CHECK["CELERY_HEARTBEAT_MAX_AGE"]` (default: `60`).
+
+### Changed
+- Minimum supported Python is now 3.12; minimum supported Django is now 5.2.11.
+- `health_check` management command no longer inherits from `CheckMixin`; it composes a `CheckMixin` instance internally to avoid leaking mixin attributes onto the Django `BaseCommand` API.
+- Test runs now emit a JUnit XML report at `tests-reports/junit.xml` (via `unittest-xml-reporting`); SonarQube consumes it through `sonar.python.xunit.reportPath`.
+- Narrowed the unknown-error catch in `celery`, `celery_ping`, `redis`, `rabbitmq`, and `django_q` backends from `BaseException` to `Exception` so worker-shutdown signals (`KeyboardInterrupt`, `SystemExit`) propagate instead of being reported as routine health-check failures.
+- Restructured `BaseHealthCheckBackend.add_error` and `health_check.contrib.psutil.apps.HealthCheckConfig.ready` to drop empty `if` branches in favor of inverted conditions (no behavior change).
+- Replaced the `with open(path, "ab"): pass` + `os.utime(path, None)` idiom in `health_check.contrib.celery_heartbeat.bootsteps.LivenessProbe` with `pathlib.Path(path).touch()`.
+- Replaced `not X == Y` comparisons with `X != Y` in the cache and storage health-check backends.
+- Renamed module-level `logger` to `_logger` across `health_check/` and made class-level `logger` attributes private on the S3 storage health checks. Standardized the logger name on `django_health_check_full_of_juice` in the migrations, S3, and RabbitMQ backends.
+- Rendered health-check index page now starts with `<!DOCTYPE html>` and the root `<html>` tag carries `lang="en"`.
+
+### Fixed
+- `health_check.contrib.psutil.apps.HealthCheckConfig.ready` checked `"DISK_USAGE_MAX" in settings.HEALTH_CHECK` while guarding the `MemoryUsage` plugin, so a `HEALTH_CHECK = {"MEMORY_MIN": None}` setting was ignored (the plugin was registered anyway) and a `HEALTH_CHECK = {"DISK_USAGE_MAX": 90}` setting raised `KeyError: 'MEMORY_MIN'` at app boot. The membership check now correctly looks up `"MEMORY_MIN"`.
+
+### Removed
+- `health_check.contrib.mail` backend (`MailHealthCheck`) and its app config.
+- Module-level `health_check.conf.HEALTH_CHECK` dict — use `health_check.conf.get_setting()` instead.
+- `health_check.__version__` and `health_check.VERSION` attributes; the package version is now set exclusively by the publish workflow from the git tag.

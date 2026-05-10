@@ -17,7 +17,7 @@ class S3Boto3StorageHealthCheck(StorageHealthCheck):
         https://github.com/jschneier/django-storages/blob/master/storages/backends/s3boto3.py
     """
 
-    logger = logging.getLogger(__name__)
+    _logger = logging.getLogger("django_health_check_full_of_juice")
     storage = "storages.backends.s3boto3.S3Boto3Storage"
     storage_alias = "default"
 

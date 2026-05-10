@@ -44,7 +44,7 @@ class StorageHealthCheck(BaseHealthCheckBackend):
         if not storage.exists(file_name):
             raise ServiceUnavailable("File does not exist")
         with storage.open(file_name) as f:
-            if not f.read() == file_content:
+            if f.read() != file_content:
                 raise ServiceUnavailable("File content does not match")
         return file_name
 

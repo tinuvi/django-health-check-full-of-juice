@@ -15,7 +15,7 @@ class S3BotoStorageHealthCheck(StorageHealthCheck):
     ``S3BotoStorage`` can be found at https://git.io/v1lGF
     """
 
-    logger = logging.getLogger(__name__)
+    _logger = logging.getLogger("django_health_check_full_of_juice")
     storage = "storages.backends.s3boto.S3BotoStorage"
 
     def check_delete(self, file_name):

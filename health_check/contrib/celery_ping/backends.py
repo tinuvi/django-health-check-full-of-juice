@@ -20,7 +20,7 @@ class CeleryPingHealthCheck(BaseHealthCheckBackend):
                 ServiceUnavailable("NotImplementedError: Make sure CELERY_RESULT_BACKEND is set"),
                 exc,
             )
-        except BaseException as exc:
+        except Exception as exc:
             self.add_error(ServiceUnavailable("Unknown error"), exc)
         else:
             if not ping_result:

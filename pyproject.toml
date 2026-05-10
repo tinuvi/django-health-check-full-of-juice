@@ -1,104 +1,49 @@
 [build-system]
-requires = ["flit_core>=3.2", "flit_scm", "wheel"]
-build-backend = "flit_scm:buildapi"
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"
 
 [project]
-name = "django-health-check"
+name = "django-health-check-full-of-juice"
+# Placeholder. The publication workflow runs `poetry version $TAG_NAME` to set the real version from the git tag.
+version = "0.0.0"
+description = "Opinionated health checks for Django applications"
 readme = { file = "README.md", content-type = "text/markdown" }
 license = { file = "LICENSE" }
 authors = [
-  { name = "Kristian Ollegaard", email = "kristian@oellegaard.com" },
-  { name = "Johannes Maron", email = "johannes@maron.family" }
+    {name = "Tinuvi", email = "no-reply@tinuvi.com"}
 ]
-keywords = ["django", "postgresql"]
-classifiers = [
-  "Development Status :: 5 - Production/Stable",
-  "Framework :: Django",
-  "Framework :: Django :: 4.2",
-  "Framework :: Django :: 5.2",
-  "Framework :: Django :: 6.0",
-  "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
-  "Operating System :: OS Independent",
-  "Programming Language :: Python",
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
-  "Programming Language :: Python :: 3.14",
-  "Topic :: Software Development :: Quality Assurance",
-  "Topic :: System :: Logging",
-  "Topic :: System :: Monitoring",
-  "Topic :: Utilities"
-]
-requires-python = ">=3.10"
-dynamic = [
-  "version",
-  "description",
-]
-dependencies = [
-  "Django>=4.2",
-]
+
+[tool.poetry]
+packages = [{ include = "health_check" }]
 
 [project.urls]
-# https://packaging.python.org/en/latest/specifications/well-known-project-urls/#well-known-labels
-Homepage = "https://codingjoe.dev/django-health-check/"
-Changelog = "https://github.com/codingjoe/django-health-check/releases"
-Source = "https://github.com/codingjoe/django-health-check"
-Releasenotes = "https://github.com/codingjoe/django-health-check/releases/latest"
-Documentation = "https://codingjoe.dev/django-health-check/"
-Issues = "https://github.com/codingjoe/django-health-check/issues"
+repository = "https://github.com/tinuvi/django-health-check-full-of-juice"
+"Bug Tracker" = "https://github.com/tinuvi/django-health-check-full-of-juice/issues"
 
-[dependency-groups]
-dev = [
-  { include-group = "test" },
-  { include-group = "docs" },
-]
-test = [
-  "pytest",
-  "pytest-cov",
-  "pytest-django",
-  "celery",
-  "redis",
-  "django-storages",
-  "boto3",
-]
-docs = [
-  "mkdocs",
-  "mkdocstrings[python]>=0.18",
-  "mkdocs-material",
-  "markdown-callouts",
-  "Pygments",
-]
+[tool.poetry.dependencies]
+python = "^3.12"
+django = "^5.2.11"
 
-[tool.flit.module]
-name = "health_check"
-
-[tool.setuptools_scm]
-write_to = "health_check/_version.py"
-
-[tool.pytest.ini_options]
-addopts = "--cov --strict-markers --cov-report=xml --cov-report=term --doctest-modules"
-testpaths = [
-  "tests",
-]
-DJANGO_SETTINGS_MODULE = "tests.testapp.settings"
-norecursedirs = ".git"
-python_files = "test_*.py"
-xfail_strict = true
-
-[tool.coverage.run]
-source = ["health_check"]
-
-[tool.coverage.report]
-show_missing = true
-skip_covered = true
+[tool.poetry.group.dev.dependencies]
+coverage = "~=7.13"
+pyrefly = "~=0.64"
+ruff = "^0.15.2"
+mypy = "^1.20.2"
+django-stubs = "~=6.0"
+types-requests = "^2.33.0.20260408"
+mutmut = "^3.5.0"
+celery = "*"
+redis = "*"
+django-storages = "*"
+boto3 = "*"
+psutil = "*"
+django-q2 = "~=1.9"
+unittest-xml-reporting = "~=4.0"
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py314"
+extend-exclude = ["scripts", ".github/workflows"]
 
 [tool.ruff.lint]
 select = [
@@ -112,10 +57,35 @@ select = [
     "UP", # pyupgrade
     "W", # pycodestyle warnings
 ]
-ignore = ["D1", "D203", "D212"]
+ignore = [
+    "E501", # line too long, formatter will handle this
+    "SIM117", # Use a single `with` statement with multiple contexts instead of nested `with` statements
+    "D1",
+    "D203",
+    "D212",
+]
 
-[tool.ruff.lint.per-file-ignores]
-"tests/*.py" = ["S101", "S105", "PLR2004"]
+[tool.pyrefly.errors]
+bad-override-param-name = false
 
-[tool.ruff.lint.isort]
-known-first-party = ["measurement", "tests"]
+[tool.pyrefly]
+python-version = "3.14"
+project-includes = ["health_check"]
+project-excludes = [
+    "**/migrations/**",
+    "**/__pycache__",
+    "**/*venv/**",
+    ".github/workflows/test_pypi_publish.py",
+]
+check-unannotated-defs = false
+infer-return-types = "checked"
+permissive-ignores = true
+
+[tool.mutmut]
+paths_to_mutate = ["health_check"]
+pytest_add_cli_args_test_selection = [
+    "tests/test_views.py",
+]
+also_copy = ["conftest.py"]
+type_check_command = ["pyrefly", "check", "--output-format=json"]
+debug = false

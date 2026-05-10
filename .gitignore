@@ -115,3 +115,7 @@ _version.py
 
 # uv
 uv.lock
+
+# mutmut
+mutants/
+mutants.sqlite

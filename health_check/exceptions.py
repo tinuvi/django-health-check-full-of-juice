@@ -15,7 +15,7 @@ class ServiceWarning(HealthCheckException):
     """
     Warning of service misbehavior.
 
-    If the ``HEALTH_CHECK['WARNINGS_AS_ERRORS']`` is set to ``False``,
+    If ``settings.HEALTH_CHECK["WARNINGS_AS_ERRORS"]`` is set to ``False``,
     these exceptions will not case a 500 status response.
     """
 

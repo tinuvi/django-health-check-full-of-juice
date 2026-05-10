@@ -11,19 +11,15 @@ class HealthCheckConfig(AppConfig):
         from .backends import DiskUsage, MemoryUsage
 
         # Ensure checks haven't been explicitly disabled before registering
-        if (
+        if not (
             hasattr(settings, "HEALTH_CHECK")
             and ("DISK_USAGE_MAX" in settings.HEALTH_CHECK)
             and (settings.HEALTH_CHECK["DISK_USAGE_MAX"] is None)
         ):
-            pass
-        else:
             plugin_dir.register(DiskUsage)
-        if (
+        if not (
             hasattr(settings, "HEALTH_CHECK")
-            and ("DISK_USAGE_MAX" in settings.HEALTH_CHECK)
+            and ("MEMORY_MIN" in settings.HEALTH_CHECK)
             and (settings.HEALTH_CHECK["MEMORY_MIN"] is None)
         ):
-            pass
-        else:
             plugin_dir.register(MemoryUsage)

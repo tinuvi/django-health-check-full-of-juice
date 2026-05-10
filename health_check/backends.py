@@ -5,7 +5,7 @@ from django.utils.translation import gettext_lazy as _  # noqa: N812
 
 from health_check.exceptions import HealthCheckException
 
-logger = logging.getLogger("health-check")
+_logger = logging.getLogger("health-check")
 
 
 class BaseHealthCheckBackend:
@@ -31,24 +31,19 @@ class BaseHealthCheckBackend:
         except HealthCheckException as e:
             self.add_error(e, e)
         except BaseException:
-            logger.exception("Unexpected Error!")
+            _logger.exception("Unexpected Error!")
             raise
         finally:
             self.time_taken = timer() - start
 
     def add_error(self, error, cause=None):
-        if isinstance(error, HealthCheckException):
-            pass
-        elif isinstance(error, str):
-            msg = error
-            error = HealthCheckException(msg)
-        else:
-            msg = _("unknown error")
+        if not isinstance(error, HealthCheckException):
+            msg = error if isinstance(error, str) else _("unknown error")
             error = HealthCheckException(msg)
         if isinstance(cause, BaseException):
-            logger.exception(str(error))
+            _logger.exception(str(error))
         else:
-            logger.error(str(error))
+            _logger.error(str(error))
         self.errors.append(error)
 
     def pretty_status(self):

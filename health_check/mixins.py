@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from django.db import connections
 from django.http import Http404
 
-from health_check.conf import HEALTH_CHECK
+from health_check.conf import get_setting
 from health_check.exceptions import ServiceWarning
 from health_check.plugins import plugin_dir
 
@@ -40,7 +40,7 @@ class CheckMixin:
         if subset is None:
             return self.plugins
 
-        health_check_subsets = HEALTH_CHECK["SUBSETS"]
+        health_check_subsets = get_setting("SUBSETS")
         if subset not in health_check_subsets or not self.plugins:
             raise Http404(f"Subset: '{subset}' does not exist.")
 
@@ -59,13 +59,13 @@ class CheckMixin:
             try:
                 return plugin
             finally:
-                if not HEALTH_CHECK["DISABLE_THREADING"]:
+                if not get_setting("DISABLE_THREADING"):
                     # DB connections are thread-local so we need to close them here
                     connections.close_all()
 
         def _collect_errors(plugin):
             if plugin.critical_service:
-                if not HEALTH_CHECK["WARNINGS_AS_ERRORS"]:
+                if not get_setting("WARNINGS_AS_ERRORS"):
                     errors.extend(e for e in plugin.errors if not isinstance(e, ServiceWarning))
                 else:
                     errors.extend(plugin.errors)
@@ -73,7 +73,7 @@ class CheckMixin:
         plugins = self.filter_plugins(subset=subset)
         plugin_instances = plugins.values()
 
-        if HEALTH_CHECK["DISABLE_THREADING"]:
+        if get_setting("DISABLE_THREADING"):
             for plugin in plugin_instances:
                 _run(plugin)
                 _collect_errors(plugin)

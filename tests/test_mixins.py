@@ -1,9 +1,9 @@
+from unittest import TestCase
 from unittest.mock import patch
 
-import pytest
+from django.test import override_settings
 
 from health_check.backends import BaseHealthCheckBackend
-from health_check.conf import HEALTH_CHECK
 from health_check.mixins import CheckMixin
 from health_check.plugins import plugin_dir
 
@@ -22,63 +22,57 @@ class Checker(CheckMixin):
     pass
 
 
-class TestCheckMixin:
-    @pytest.fixture(autouse=True)
-    def setup(self):
+class TestCheckMixin(TestCase):
+    def setUp(self):
         plugin_dir.reset()
         plugin_dir.register(FailPlugin)
         plugin_dir.register(OkPlugin)
-        yield
-        plugin_dir.reset()
+        self.addCleanup(plugin_dir.reset)
 
-    @pytest.mark.parametrize("disable_threading", [(True,), (False,)])
-    def test_plugins(self, monkeypatch, disable_threading):
-        monkeypatch.setitem(HEALTH_CHECK, "DISABLE_THREADING", disable_threading)
+    def test_plugins(self):
+        for disable_threading in [True, False]:
+            with self.subTest(disable_threading=disable_threading):
+                with override_settings(HEALTH_CHECK={"DISABLE_THREADING": disable_threading}):
+                    self.assertEqual(len(Checker().plugins), 2)
 
-        assert len(Checker().plugins) == 2
+    def test_errors(self):
+        for disable_threading in [True, False]:
+            with self.subTest(disable_threading=disable_threading):
+                with override_settings(HEALTH_CHECK={"DISABLE_THREADING": disable_threading}):
+                    self.assertEqual(len(Checker().errors), 1)
 
-    @pytest.mark.parametrize("disable_threading", [(True,), (False,)])
-    def test_errors(self, monkeypatch, disable_threading):
-        monkeypatch.setitem(HEALTH_CHECK, "DISABLE_THREADING", disable_threading)
+    def test_run_check(self):
+        for disable_threading in [True, False]:
+            with self.subTest(disable_threading=disable_threading):
+                with override_settings(HEALTH_CHECK={"DISABLE_THREADING": disable_threading}):
+                    self.assertEqual(len(Checker().run_check()), 1)
 
-        assert len(Checker().errors) == 1
-
-    @pytest.mark.parametrize("disable_threading", [(True,), (False,)])
-    def test_run_check(self, monkeypatch, disable_threading):
-        monkeypatch.setitem(HEALTH_CHECK, "DISABLE_THREADING", disable_threading)
-
-        assert len(Checker().run_check()) == 1
-
-    def test_run_check_threading_enabled(self, monkeypatch):
+    def test_run_check_threading_enabled(self):
         """Ensure threading used when not disabled."""
-        # Ensure threading is enabled.
-        monkeypatch.setitem(HEALTH_CHECK, "DISABLE_THREADING", False)
-
-        # Ensure ThreadPoolExecutor is used
-        with patch("health_check.mixins.ThreadPoolExecutor") as tpe:
-            Checker().run_check()
-            tpe.assert_called()
-
-        # Ensure ThreadPoolExecutor is used
-        with patch(
-            "django.db.connections.close_all",
-        ) as close_all:
-            Checker().run_check()
-            close_all.assert_called()
-
-    def test_run_check_threading_disabled(self, monkeypatch):
-        """Ensure threading not used when disabled."""
-        # Ensure threading is disabled.
-        monkeypatch.setitem(HEALTH_CHECK, "DISABLE_THREADING", True)
-
-        # Ensure ThreadPoolExecutor is not used
-        with patch("health_check.mixins.ThreadPoolExecutor") as tpe:
-            Checker().run_check()
-            tpe.assert_not_called()
+        with override_settings(HEALTH_CHECK={"DISABLE_THREADING": False}):
+            # Ensure ThreadPoolExecutor is used
+            with patch("health_check.mixins.ThreadPoolExecutor") as tpe:
+                Checker().run_check()
+                tpe.assert_called()
 
             # Ensure ThreadPoolExecutor is used
             with patch(
                 "django.db.connections.close_all",
             ) as close_all:
                 Checker().run_check()
-                close_all.assert_not_called()
+                close_all.assert_called()
+
+    def test_run_check_threading_disabled(self):
+        """Ensure threading not used when disabled."""
+        with override_settings(HEALTH_CHECK={"DISABLE_THREADING": True}):
+            # Ensure ThreadPoolExecutor is not used
+            with patch("health_check.mixins.ThreadPoolExecutor") as tpe:
+                Checker().run_check()
+                tpe.assert_not_called()
+
+                # Ensure ThreadPoolExecutor is used
+                with patch(
+                    "django.db.connections.close_all",
+                ) as close_all:
+                    Checker().run_check()
+                    close_all.assert_not_called()
