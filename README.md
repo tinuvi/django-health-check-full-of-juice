@@ -23,25 +23,12 @@ Requires Python ≥ 3.12 and Django ≥ 5.2.11.
 
 ## Quick start
 
-1. Add `health_check` (and any built-in backends you want to use) to `INSTALLED_APPS`:
+1. Add `health_check` to `INSTALLED_APPS`. **No contrib app needs to be installed** — backends are referenced by dotted import path in `HEALTH_CHECK["SUBSETS"]` and resolved on demand.
 
    ```python
    INSTALLED_APPS = [
        # ...
        "health_check",
-       "health_check.cache",
-       "health_check.db",
-       "health_check.storage",
-       "health_check.contrib.celery",
-       "health_check.contrib.celery_heartbeat",
-       "health_check.contrib.celery_ping",
-       "health_check.contrib.db_heartbeat",
-       "health_check.contrib.django_q",
-       "health_check.contrib.migrations",
-       "health_check.contrib.psutil",
-       "health_check.contrib.rabbitmq",
-       "health_check.contrib.redis",
-       "health_check.contrib.s3boto3_storage",
    ]
    ```
 
@@ -57,20 +44,30 @@ Requires Python ≥ 3.12 and Django ≥ 5.2.11.
    ]
    ```
 
-3. Hit `GET /ht/` from your load balancer / Kubernetes probe / monitoring tool. The endpoint returns `200 OK` if every registered backend reports healthy and `500` otherwise. Pass `?format=json` to get a JSON response.
+3. Declare at least one named subset under `HEALTH_CHECK["SUBSETS"]`. Each entry is the dotted import path to a `BaseHealthCheckBackend` subclass:
+
+   ```python
+   # settings.py
+   HEALTH_CHECK = {
+       "SUBSETS": {
+           "readiness": [
+               "health_check.contrib.db_heartbeat.backends.DatabaseHeartbeatCheck",
+               "health_check.contrib.migrations.backends.MigrationsHealthCheck",
+           ],
+       },
+   }
+   ```
+
+4. Hit `GET /ht/<subset-name>/` from your load balancer / Kubernetes probe / monitoring tool. Returns `200 OK` if every backend reports healthy, `500` otherwise. Pass `?format=json` for a JSON response.
+
+There is no "run every backend" endpoint — every probe targets an explicit subset, so the response is always reproducible.
 
 ## Running checks from the CLI
 
-A management command is also available — useful in deploy pipelines and one-off diagnostics:
+A management command is also available — useful in deploy pipelines and one-off diagnostics. `--subset` is required:
 
 ```bash
-python manage.py health_check
-```
-
-Run a named subset (see [Subsets](#subsets) below):
-
-```bash
-python manage.py health_check --subset <subset-name>
+python manage.py health_check --subset readiness
 ```
 
 The command exits non-zero if any check fails.
@@ -125,18 +122,18 @@ HEALTH_CHECK = {
     "SUBSETS": {
         # Crucial services the app literally cannot serve traffic without.
         "readiness": [
-            "MigrationsHealthCheck",
-            "DatabaseBackend",
+            "health_check.contrib.migrations.backends.MigrationsHealthCheck",
+            "health_check.contrib.db_heartbeat.backends.DatabaseHeartbeatCheck",
         ],
         # Everything readiness has, plus every other integration the app talks to.
         "integrations": [
-            "MigrationsHealthCheck",
-            "DatabaseBackend",
-            "CacheBackend",
-            "DefaultFileStorageHealthCheck",
-            "RedisHealthCheck",
-            "CeleryPingHealthCheck",
-            "RabbitMQHealthCheck",
+            "health_check.contrib.migrations.backends.MigrationsHealthCheck",
+            "health_check.contrib.db_heartbeat.backends.DatabaseHeartbeatCheck",
+            "health_check.cache.backends.CacheBackend",
+            "health_check.storage.backends.DefaultFileStorageHealthCheck",
+            "health_check.contrib.redis.backends.RedisHealthCheck",
+            "health_check.contrib.celery_ping.backends.CeleryPingHealthCheck",
+            "health_check.contrib.rabbitmq.backends.RabbitMQHealthCheck",
         ],
     },
 }
@@ -144,7 +141,7 @@ HEALTH_CHECK = {
 
 Keep `readiness` to backends the app literally cannot function without — failing it pulls every pod out of the load balancer at once, so a non-critical hiccup (e.g. Redis) shouldn't be in there or you've turned a degraded-performance event into a full outage. `CacheBackend` lives in `integrations` only, on the assumption that sessions are stored in the database (Django's default, `django.contrib.sessions.backends.db`). If your project sets `SESSION_ENGINE = "django.contrib.sessions.backends.cache"` (or `cached_db`), users can't authenticate without the cache — move `CacheBackend` back into `readiness` for that project.
 
-If your project uses Django-Q instead of (or alongside) Celery, swap in or add `DjangoQClusterHealthCheck` to `integrations`. It reads the heartbeat the Django-Q sentinel publishes to its broker on every cycle, so the web tier can fail synthetic monitoring when the worker fleet stops broadcasting.
+If your project uses Django-Q instead of (or alongside) Celery, swap in or add `health_check.contrib.django_q.backends.DjangoQClusterHealthCheck` to `integrations`. It reads the heartbeat the Django-Q sentinel publishes to its broker on every cycle, so the web tier can fail synthetic monitoring when the worker fleet stops broadcasting.
 
 That gives you:
 
@@ -152,7 +149,7 @@ That gives you:
 - `GET /healthcheck/readiness` — orchestrator readiness probe (subset).
 - `GET /healthcheck/integrations` — full dependency check, e.g. for synthetic monitoring.
 
-The backend names in each subset are the registered class names of whichever `health_check.*` apps you put in `INSTALLED_APPS` — only list backends you've actually enabled.
+`python manage.py check` validates every dotted path in `HEALTH_CHECK["SUBSETS"]` at boot — typos and non-`BaseHealthCheckBackend` references surface as `health_check.E002`/`E003`/`E004` errors so CI catches them before deploy.
 
 ### Kubernetes probes
 
@@ -204,13 +201,13 @@ livenessProbe:
 
 Django-Q's sentinel publishes a `Stat` snapshot to the broker every cycle (TTL ≈ 3 s) — so the entry vanishes within seconds when the sentinel wedges or dies. Two backends sit on top of that signal:
 
-- `DjangoQLocalHealthCheck` — passes only if a stat keyed to the current host is fresh. Use this for the worker pod's `livenessProbe`.
-- `DjangoQClusterHealthCheck` — passes if any stat for the configured cluster name is fresh. Use this in the web tier's `integrations` subset.
+- `health_check.contrib.django_q.backends.DjangoQLocalHealthCheck` — passes only if a stat keyed to the current host is fresh. Use this for the worker pod's `livenessProbe`.
+- `health_check.contrib.django_q.backends.DjangoQClusterHealthCheck` — passes if any stat for the configured cluster name is fresh. Use this in the web tier's `integrations` subset.
 
 ```python
 HEALTH_CHECK = {
     "SUBSETS": {
-        "liveness": ["DjangoQLocalHealthCheck"],
+        "liveness": ["health_check.contrib.django_q.backends.DjangoQLocalHealthCheck"],
         # readiness / integrations as above
     },
 }
@@ -239,7 +236,7 @@ Then point the `liveness` subset at the matching backend:
 ```python
 HEALTH_CHECK = {
     "SUBSETS": {
-        "liveness": ["CeleryHeartbeatHealthCheck"],
+        "liveness": ["health_check.contrib.celery_heartbeat.backends.CeleryHeartbeatHealthCheck"],
         # readiness / integrations as above
     },
 }
@@ -256,7 +253,7 @@ HEALTH_CHECK = {
     "DISK_USAGE_MAX": 90,         # percent; emits a warning when disk usage is at/above this threshold
     "MEMORY_MIN": 100,            # MB of available RAM below which a warning is emitted
     "WARNINGS_AS_ERRORS": True,   # if False, ServiceWarning won't fail the endpoint with HTTP 500
-    "SUBSETS": {},                # named subsets — see below
+    "SUBSETS": {},                # named subsets — see below; required to expose any probe
     "DISABLE_THREADING": False,   # if True, run backends sequentially in the request thread
 }
 ```
@@ -265,21 +262,35 @@ Settings are read lazily at check time via `health_check.conf.get_setting`, so `
 
 ### Subsets
 
-Group backends so probes can target a specific slice of your stack. The values are the class names of the registered backends. Hit a subset via `/<your-mount-point>/<subset-name>/` or `python manage.py health_check --subset <subset-name>`.
+Group backends so probes can target a specific slice of your stack. Each entry is one of:
+
+- A dotted import path string — `"my.module.MyHealthCheck"` — instantiated with no arguments.
+- A `(path, kwargs)` 2-element tuple/list — `("my.module.MyHealthCheck", {"alias": "replica"})` — instantiated as `MyHealthCheck(**kwargs)`. Use this to spin up multiple instances of the same backend with different configuration (e.g. one `CacheBackend` per cache alias). The `kwargs` dict is deep-copied per request so a backend that mutates its own state can't leak into later probes.
+
+Hit a subset via `/<your-mount-point>/<subset-name>/` or `python manage.py health_check --subset <subset-name>`.
 
 ```python
 HEALTH_CHECK = {
     "SUBSETS": {
-        "startup": ["MigrationsHealthCheck", "DatabaseBackend"],
+        "startup": [
+            "health_check.contrib.migrations.backends.MigrationsHealthCheck",
+            "health_check.contrib.db_heartbeat.backends.DatabaseHeartbeatCheck",
+        ],
+        "integrations": [
+            "health_check.cache.backends.CacheBackend",  # default cache
+            ("health_check.cache.backends.CacheBackend", {"backend": "cockatiel"}),  # named cache
+        ],
     },
 }
 ```
+
+If you list the same backend class more than once with different kwargs, override `identifier()` so each instance returns a distinct string — the response dict is keyed by identifier, and same-keyed entries silently overwrite each other. The built-in `CacheBackend.identifier()` already returns `f"Cache backend: {self.backend}"`, so the example above is safe out of the box.
 
 See [Recommended setup](#recommended-setup) for the readiness/integrations layout we use in production.
 
 ## Writing a custom backend
 
-Subclass `BaseHealthCheckBackend`, implement `check_status`, and register it on app ready:
+Subclass `BaseHealthCheckBackend`, implement `check_status`, and reference it by dotted path in `HEALTH_CHECK["SUBSETS"]`:
 
 ```python
 # myapp/backends.py
@@ -293,24 +304,18 @@ class MyServiceHealthCheck(BaseHealthCheckBackend):
     def check_status(self):
         if not my_service.is_reachable():
             raise ServiceUnavailable("my-service is unreachable")
-
-    def identifier(self):
-        return self.__class__.__name__
 ```
 
 ```python
-# myapp/apps.py
-from django.apps import AppConfig
-from health_check.plugins import plugin_dir
-
-
-class MyAppConfig(AppConfig):
-    name = "myapp"
-
-    def ready(self):
-        from .backends import MyServiceHealthCheck
-
-        plugin_dir.register(MyServiceHealthCheck)
+# settings.py
+HEALTH_CHECK = {
+    "SUBSETS": {
+        "integrations": [
+            # ...
+            "myapp.backends.MyServiceHealthCheck",
+        ],
+    },
+}
 ```
 
-Add `myapp` to `INSTALLED_APPS` and the new backend will appear alongside the built-ins.
+No `AppConfig.ready()` hook is needed — the backend is loaded on demand the first time the subset is hit, and `python manage.py check` validates the path at boot time.

@@ -1,10 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.apps import apps
 from django.test import SimpleTestCase
 
-from health_check.contrib.django_q.apps import HealthCheckConfig
 from health_check.contrib.django_q.backends import (
     DjangoQClusterHealthCheck,
     DjangoQLocalHealthCheck,
@@ -158,11 +156,3 @@ class TestDjangoQLocalHealthCheck(SimpleTestCase):
             check.check_status()
 
         self.assertEqual(check.errors, [])
-
-
-class TestDjangoQHealthCheckConfig(SimpleTestCase):
-    def test_apps(self):
-        self.assertEqual(HealthCheckConfig.name, "health_check.contrib.django_q")
-
-        django_q_app = apps.get_app_config("django_q")
-        self.assertEqual(django_q_app.name, "health_check.contrib.django_q")

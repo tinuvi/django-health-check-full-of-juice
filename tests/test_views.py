@@ -3,13 +3,61 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 
 from django.db import DatabaseError
-from django.test import SimpleTestCase, TransactionTestCase
+from django.test import SimpleTestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
 from health_check.backends import BaseHealthCheckBackend
 from health_check.exceptions import ServiceWarning
-from health_check.plugins import plugin_dir
 from health_check.views import MediaType
+
+
+class _AlwaysOk(BaseHealthCheckBackend):
+    def run_check(self):
+        pass
+
+
+class _AlwaysFail(BaseHealthCheckBackend):
+    def check_status(self):
+        self.add_error("Super Fail!")
+
+
+class _AlwaysWarn(BaseHealthCheckBackend):
+    def check_status(self):
+        raise ServiceWarning("so so")
+
+
+class _NonCriticalFail(BaseHealthCheckBackend):
+    critical_service = False
+
+    def check_status(self):
+        self.add_error("Super Fail!")
+
+
+class _JsonOk(BaseHealthCheckBackend):
+    def run_check(self):
+        pass
+
+
+class _JsonError(BaseHealthCheckBackend):
+    def run_check(self):
+        self.add_error("JSON Error")
+
+
+class _SuccessOne(BaseHealthCheckBackend):
+    def run_check(self):
+        pass
+
+
+class _SuccessTwo(BaseHealthCheckBackend):
+    def run_check(self):
+        pass
+
+
+def _subset(*paths):
+    return {"HEALTH_CHECK": {"SUBSETS": {"probe": list(paths)}}}
+
+
+_PROBE_URL = reverse("health_check:health_check_subset", kwargs={"subset": "probe"})
 
 
 class TestMediaType(TestCase):
@@ -83,15 +131,15 @@ class TestMediaType(TestCase):
 
 
 class TestMainView(SimpleTestCase):
-    url = reverse("health_check:health_check_home")
-
+    @override_settings(**_subset("tests.test_views._AlwaysOk"))
     def test_success(self):
-        response = self.client.get(self.url)
+        response = self.client.get(_PROBE_URL)
         self.assertEqual(response.status_code, 200, msg=response.content.decode("utf-8"))
         self.assertEqual(response["content-type"], "text/html; charset=utf-8")
 
+    @override_settings(**_subset("tests.test_views._AlwaysOk"))
     def test_html_has_doctype_and_lang(self):
-        response = self.client.get(self.url)
+        response = self.client.get(_PROBE_URL)
         body = response.content.decode("utf-8")
         self.assertTrue(
             body.lstrip().startswith("<!DOCTYPE html>"),
@@ -99,86 +147,54 @@ class TestMainView(SimpleTestCase):
         )
         self.assertIn('<html lang="en">', body)
 
+    @override_settings(**_subset("tests.test_views._AlwaysFail"))
     def test_error(self):
-        class MyBackend(BaseHealthCheckBackend):
-            def check_status(self):
-                self.add_error("Super Fail!")
-
-        plugin_dir.reset()
-        plugin_dir.register(MyBackend)
-        response = self.client.get(self.url)
+        response = self.client.get(_PROBE_URL)
         self.assertContains(response, "Super Fail!", status_code=500)
         self.assertEqual(response["content-type"], "text/html; charset=utf-8")
 
     def test_warning(self):
-        class MyBackend(BaseHealthCheckBackend):
-            def check_status(self):
-                raise ServiceWarning("so so")
+        with override_settings(**_subset("tests.test_views._AlwaysWarn")):
+            response = self.client.get(_PROBE_URL)
+            self.assertContains(response, "so so", status_code=500)
 
-        plugin_dir.reset()
-        plugin_dir.register(MyBackend)
-        response = self.client.get(self.url)
-        self.assertContains(response, "so so", status_code=500)
-
-        with self.settings(HEALTH_CHECK={"WARNINGS_AS_ERRORS": False}):
-            response = self.client.get(self.url)
+        with override_settings(
+            HEALTH_CHECK={
+                "SUBSETS": {"probe": ["tests.test_views._AlwaysWarn"]},
+                "WARNINGS_AS_ERRORS": False,
+            }
+        ):
+            response = self.client.get(_PROBE_URL)
             self.assertContains(response, "so so", status_code=200)
             self.assertEqual(response["content-type"], "text/html; charset=utf-8")
 
+    @override_settings(**_subset("tests.test_views._NonCriticalFail"))
     def test_non_critical(self):
-        class MyBackend(BaseHealthCheckBackend):
-            critical_service = False
-
-            def check_status(self):
-                self.add_error("Super Fail!")
-
-        plugin_dir.reset()
-        plugin_dir.register(MyBackend)
-        response = self.client.get(self.url)
+        response = self.client.get(_PROBE_URL)
         self.assertContains(response, "Super Fail!", status_code=200)
         self.assertEqual(response["content-type"], "text/html; charset=utf-8")
 
+    @override_settings(**_subset("tests.test_views._JsonOk"))
     def test_success_accept_json(self):
-        class JSONSuccessBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                pass
-
-        plugin_dir.reset()
-        plugin_dir.register(JSONSuccessBackend)
-        response = self.client.get(self.url, HTTP_ACCEPT="application/json")
+        response = self.client.get(_PROBE_URL, HTTP_ACCEPT="application/json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["content-type"], "application/json")
 
+    @override_settings(**_subset("tests.test_views._JsonOk"))
     def test_success_prefer_json(self):
-        class JSONSuccessBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                pass
-
-        plugin_dir.reset()
-        plugin_dir.register(JSONSuccessBackend)
-        response = self.client.get(self.url, HTTP_ACCEPT="application/json; q=0.8, text/html; q=0.5")
+        response = self.client.get(_PROBE_URL, HTTP_ACCEPT="application/json; q=0.8, text/html; q=0.5")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["content-type"], "application/json")
 
+    @override_settings(**_subset("tests.test_views._AlwaysOk"))
     def test_success_accept_xhtml(self):
-        class SuccessBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                pass
-
-        plugin_dir.reset()
-        plugin_dir.register(SuccessBackend)
-        response = self.client.get(self.url, HTTP_ACCEPT="application/xhtml+xml")
+        response = self.client.get(_PROBE_URL, HTTP_ACCEPT="application/xhtml+xml")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["content-type"], "text/html; charset=utf-8")
 
+    @override_settings(**_subset("tests.test_views._AlwaysOk"))
     def test_success_unsupported_accept(self):
-        class SuccessBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                pass
-
-        plugin_dir.reset()
-        plugin_dir.register(SuccessBackend)
-        response = self.client.get(self.url, HTTP_ACCEPT="application/octet-stream")
+        response = self.client.get(_PROBE_URL, HTTP_ACCEPT="application/octet-stream")
         self.assertEqual(response.status_code, 406)
         self.assertEqual(response["content-type"], "text/plain")
         self.assertEqual(
@@ -186,174 +202,110 @@ class TestMainView(SimpleTestCase):
             b"Not Acceptable: Supported content types: text/html, application/json",
         )
 
+    @override_settings(**_subset("tests.test_views._AlwaysOk"))
     def test_success_unsupported_and_supported_accept(self):
-        class SuccessBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                pass
-
-        plugin_dir.reset()
-        plugin_dir.register(SuccessBackend)
-        response = self.client.get(self.url, HTTP_ACCEPT="application/octet-stream, application/json; q=0.9")
+        response = self.client.get(_PROBE_URL, HTTP_ACCEPT="application/octet-stream, application/json; q=0.9")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["content-type"], "application/json")
 
+    @override_settings(**_subset("tests.test_views._JsonOk"))
     def test_success_accept_order(self):
-        class JSONSuccessBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                pass
-
-        plugin_dir.reset()
-        plugin_dir.register(JSONSuccessBackend)
         response = self.client.get(
-            self.url,
+            _PROBE_URL,
             HTTP_ACCEPT="text/html, application/xhtml+xml, application/json; q=0.9, */*; q=0.1",
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["content-type"], "text/html; charset=utf-8")
 
+    @override_settings(**_subset("tests.test_views._JsonOk"))
     def test_success_accept_order__reverse(self):
-        class JSONSuccessBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                pass
-
-        plugin_dir.reset()
-        plugin_dir.register(JSONSuccessBackend)
         response = self.client.get(
-            self.url,
+            _PROBE_URL,
             HTTP_ACCEPT="text/html; q=0.1, application/xhtml+xml; q=0.1, application/json",
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["content-type"], "application/json")
 
+    @override_settings(**_subset("tests.test_views._JsonOk"))
     def test_format_override(self):
-        class JSONSuccessBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                pass
-
-        plugin_dir.reset()
-        plugin_dir.register(JSONSuccessBackend)
-        response = self.client.get(self.url + "?format=json", HTTP_ACCEPT="text/html")
+        response = self.client.get(_PROBE_URL + "?format=json", HTTP_ACCEPT="text/html")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["content-type"], "application/json")
 
+    @override_settings(**_subset("tests.test_views._JsonOk"))
     def test_format_no_accept_header(self):
-        class JSONSuccessBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                pass
-
-        plugin_dir.reset()
-        plugin_dir.register(JSONSuccessBackend)
-        response = self.client.get(self.url)
+        response = self.client.get(_PROBE_URL)
         self.assertEqual(response.status_code, 200, msg=response.content.decode("utf-8"))
         self.assertEqual(response["content-type"], "text/html; charset=utf-8")
 
+    @override_settings(**_subset("tests.test_views._JsonError"))
     def test_error_accept_json(self):
-        class JSONErrorBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                self.add_error("JSON Error")
-
-        plugin_dir.reset()
-        plugin_dir.register(JSONErrorBackend)
-        response = self.client.get(self.url, HTTP_ACCEPT="application/json")
+        response = self.client.get(_PROBE_URL, HTTP_ACCEPT="application/json")
         self.assertEqual(response.status_code, 500, msg=response.content.decode("utf-8"))
         self.assertEqual(response["content-type"], "application/json")
-        self.assertIn("JSON Error", json.loads(response.content.decode("utf-8"))[JSONErrorBackend().identifier()])
+        self.assertIn("JSON Error", json.loads(response.content.decode("utf-8"))[_JsonError().identifier()])
 
+    @override_settings(**_subset("tests.test_views._JsonOk"))
     def test_success_param_json(self):
-        class JSONSuccessBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                pass
-
-        plugin_dir.reset()
-        plugin_dir.register(JSONSuccessBackend)
-        response = self.client.get(self.url, {"format": "json"})
+        response = self.client.get(_PROBE_URL, {"format": "json"})
         self.assertEqual(response.status_code, 200, msg=response.content.decode("utf-8"))
         self.assertEqual(response["content-type"], "application/json")
         self.assertJSONEqual(
             response.content.decode("utf-8"),
-            {JSONSuccessBackend().identifier(): JSONSuccessBackend().pretty_status()},
+            {_JsonOk().identifier(): _JsonOk().pretty_status()},
         )
 
     def test_success_subset_define(self):
-        class SuccessOneBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                pass
-
-        class SuccessTwoBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                pass
-
-        plugin_dir.reset()
-        plugin_dir.register(SuccessOneBackend)
-        plugin_dir.register(SuccessTwoBackend)
-
-        with self.settings(
+        with override_settings(
             HEALTH_CHECK={
                 "SUBSETS": {
-                    "startup-probe": ["SuccessOneBackend", "SuccessTwoBackend"],
-                    "liveness-probe": ["SuccessTwoBackend"],
+                    "startup-probe": [
+                        "tests.test_views._SuccessOne",
+                        "tests.test_views._SuccessTwo",
+                    ],
+                    "liveness-probe": ["tests.test_views._SuccessTwo"],
                 }
             }
         ):
-            response_startup_probe = self.client.get(self.url + "startup-probe/", {"format": "json"})
-            self.assertEqual(
-                response_startup_probe.status_code,
-                200,
-                msg=response_startup_probe.content.decode("utf-8"),
-            )
-            self.assertEqual(response_startup_probe["content-type"], "application/json")
+            startup_url = reverse("health_check:health_check_subset", kwargs={"subset": "startup-probe"})
+            response_startup = self.client.get(startup_url, {"format": "json"})
+            self.assertEqual(response_startup.status_code, 200, msg=response_startup.content.decode("utf-8"))
+            self.assertEqual(response_startup["content-type"], "application/json")
             self.assertJSONEqual(
-                response_startup_probe.content.decode("utf-8"),
+                response_startup.content.decode("utf-8"),
                 {
-                    SuccessOneBackend().identifier(): SuccessOneBackend().pretty_status(),
-                    SuccessTwoBackend().identifier(): SuccessTwoBackend().pretty_status(),
+                    _SuccessOne().identifier(): _SuccessOne().pretty_status(),
+                    _SuccessTwo().identifier(): _SuccessTwo().pretty_status(),
                 },
             )
 
-            response_liveness_probe = self.client.get(self.url + "liveness-probe/", {"format": "json"})
-            self.assertEqual(
-                response_liveness_probe.status_code,
-                200,
-                msg=response_liveness_probe.content.decode("utf-8"),
-            )
-            self.assertEqual(response_liveness_probe["content-type"], "application/json")
+            liveness_url = reverse("health_check:health_check_subset", kwargs={"subset": "liveness-probe"})
+            response_liveness = self.client.get(liveness_url, {"format": "json"})
+            self.assertEqual(response_liveness.status_code, 200, msg=response_liveness.content.decode("utf-8"))
+            self.assertEqual(response_liveness["content-type"], "application/json")
             self.assertJSONEqual(
-                response_liveness_probe.content.decode("utf-8"),
-                {SuccessTwoBackend().identifier(): SuccessTwoBackend().pretty_status()},
+                response_liveness.content.decode("utf-8"),
+                {_SuccessTwo().identifier(): _SuccessTwo().pretty_status()},
             )
 
     def test_error_subset_not_found(self):
-        plugin_dir.reset()
-        response = self.client.get(self.url + "liveness-probe/", {"format": "json"})
-        print(f"content: {response.content}")
-        print(f"code: {response.status_code}")
-        self.assertEqual(response.status_code, 404, msg=response.content.decode("utf-8"))
+        with override_settings(HEALTH_CHECK={"SUBSETS": {}}):
+            url = reverse("health_check:health_check_subset", kwargs={"subset": "ghost"})
+            response = self.client.get(url, {"format": "json"})
+            self.assertEqual(response.status_code, 404, msg=response.content.decode("utf-8"))
 
+    @override_settings(**_subset("tests.test_views._JsonError"))
     def test_error_param_json(self):
-        class JSONErrorBackend(BaseHealthCheckBackend):
-            def run_check(self):
-                self.add_error("JSON Error")
-
-        plugin_dir.reset()
-        plugin_dir.register(JSONErrorBackend)
-        response = self.client.get(self.url, {"format": "json"})
+        response = self.client.get(_PROBE_URL, {"format": "json"})
         self.assertEqual(response.status_code, 500, msg=response.content.decode("utf-8"))
         self.assertEqual(response["content-type"], "application/json")
-        self.assertIn("JSON Error", json.loads(response.content.decode("utf-8"))[JSONErrorBackend().identifier()])
+        self.assertIn("JSON Error", json.loads(response.content.decode("utf-8"))[_JsonError().identifier()])
 
 
 class TestMainViewAtomicRequests(TransactionTestCase):
-    url = reverse("health_check:health_check_home")
-
-    def setUp(self):
-        # Other tests in this module reset the plugin registry; restore a DB-touching
-        # plugin so the mocked ensure_connection actually surfaces during the request.
-        from health_check.db.backends import DatabaseBackend
-
-        plugin_dir.reset()
-        plugin_dir.register(DatabaseBackend)
-        self.addCleanup(plugin_dir.reset)
-
+    @override_settings(
+        HEALTH_CHECK={"SUBSETS": {"probe": ["health_check.contrib.db_heartbeat.backends.DatabaseHeartbeatCheck"]}}
+    )
     def test_non_native_atomic_request(self):
         # See also: https://github.com/codingjoe/django-health-check/pull/469
         from django.conf import settings as dj_settings
@@ -361,12 +313,11 @@ class TestMainViewAtomicRequests(TransactionTestCase):
         original = dj_settings.DATABASES["default"].get("ATOMIC_REQUESTS", False)
         dj_settings.DATABASES["default"]["ATOMIC_REQUESTS"] = True
         try:
-            # disable the ensure_connection
             with patch(
                 "django.db.backends.base.base.BaseDatabaseWrapper.ensure_connection",
                 Mock(side_effect=DatabaseError()),
             ):
-                response = self.client.get(self.url)
+                response = self.client.get(_PROBE_URL)
                 self.assertContains(response, "<title>System status</title>", status_code=500)
         finally:
             dj_settings.DATABASES["default"]["ATOMIC_REQUESTS"] = original

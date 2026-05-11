@@ -1,11 +1,8 @@
 from unittest import TestCase
 from unittest.mock import patch
 
-from django.apps import apps
 from django.conf import settings
-from django.test import SimpleTestCase
 
-from health_check.contrib.celery_ping.apps import HealthCheckConfig
 from health_check.contrib.celery_ping.backends import CeleryPingHealthCheck
 
 
@@ -119,11 +116,3 @@ class TestCeleryPingHealthCheck(TestCase):
 
                     self.assertEqual(len(health_check.errors), 1)
                     self.assertIn("workers unavailable", health_check.errors[0].message.lower())
-
-
-class TestCeleryPingHealthCheckApps(SimpleTestCase):
-    def test_apps(self):
-        self.assertEqual(HealthCheckConfig.name, "health_check.contrib.celery_ping")
-
-        celery_ping = apps.get_app_config("celery_ping")
-        self.assertEqual(celery_ping.name, "health_check.contrib.celery_ping")

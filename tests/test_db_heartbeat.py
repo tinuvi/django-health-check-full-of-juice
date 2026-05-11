@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import TestCase as DjangoTestCase
 
-from health_check.contrib.db_heartbeat.backends import DatabaseHeartBeatCheck, SelectOne
+from health_check.contrib.db_heartbeat.backends import DatabaseHeartbeatCheck, SelectOne
 from health_check.exceptions import ServiceUnavailable
 
 
@@ -21,9 +21,9 @@ class TestSelectOne(TestCase):
         self.assertFalse(params)
 
 
-class TestDatabaseHeartBeatCheck(DjangoTestCase):
+class TestDatabaseHeartbeatCheck(DjangoTestCase):
     def test_check_status__success(self):
-        health_check = DatabaseHeartBeatCheck()
+        health_check = DatabaseHeartbeatCheck()
         health_check.check_status()
 
     @patch("health_check.contrib.db_heartbeat.backends.connection")
@@ -32,7 +32,7 @@ class TestDatabaseHeartBeatCheck(DjangoTestCase):
         mock_cursor.fetchone.return_value = (1,)
         mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
 
-        health_check = DatabaseHeartBeatCheck()
+        health_check = DatabaseHeartbeatCheck()
         try:
             health_check.check_status()
         except Exception as e:
@@ -42,6 +42,6 @@ class TestDatabaseHeartBeatCheck(DjangoTestCase):
     def test_check_status_service_unavailable(self, mock_connection):
         mock_connection.cursor.side_effect = Exception("Database error")
 
-        health_check = DatabaseHeartBeatCheck()
+        health_check = DatabaseHeartbeatCheck()
         with self.assertRaises(ServiceUnavailable):
             health_check.check_status()

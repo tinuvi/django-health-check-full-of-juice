@@ -1,3 +1,5 @@
+import warnings
+
 from celery.exceptions import TaskRevokedError, TimeoutError
 from django.conf import settings
 
@@ -8,7 +10,18 @@ from .tasks import add
 
 
 class CeleryHealthCheck(BaseHealthCheckBackend):
+    queue = "celery"
+
     def check_status(self):
+        if hasattr(settings, "HEALTHCHECK_CELERY_TIMEOUT"):
+            warnings.warn(
+                "HEALTHCHECK_CELERY_TIMEOUT is deprecated and may be removed in the "
+                "future. Please use HEALTHCHECK_CELERY_RESULT_TIMEOUT and "
+                "HEALTHCHECK_CELERY_QUEUE_TIMEOUT instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         timeout = getattr(settings, "HEALTHCHECK_CELERY_TIMEOUT", 3)
         result_timeout = getattr(settings, "HEALTHCHECK_CELERY_RESULT_TIMEOUT", timeout)
         queue_timeout = getattr(settings, "HEALTHCHECK_CELERY_QUEUE_TIMEOUT", timeout)

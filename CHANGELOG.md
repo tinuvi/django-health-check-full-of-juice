@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-05-11
+
+### Added
+- Django system checks `health_check.E002`/`E004`/`E005` (alongside the existing `W001`): validate every entry in `HEALTH_CHECK["SUBSETS"]` at `manage.py check` time. `E002` fires when a subset value isn't a list/tuple; `E004` when a dotted path can't be imported or doesn't resolve to a `BaseHealthCheckBackend` subclass; `E005` when an entry is malformed (not a string, not a 2-element `(path, kwargs)` sequence, wrong arity, non-string path, or non-dict kwargs).
+- `health_check.mixins.resolve_backend(dotted_path)` and `health_check.mixins.parse_subset_entry(entry)`: helpers used by both `CheckMixin.filter_plugins` and the system check. `resolve_backend` raises `ImproperlyConfigured` on missing modules, missing attributes, or non-subclass references; `parse_subset_entry` normalizes a string or `(path, kwargs)` entry into `(path, kwargs)`.
+- **Parameterized backends in `SUBSETS`**: each entry can now be either a dotted path string (zero-arg construction) or a `(path, kwargs)` 2-element tuple/list — e.g. `("health_check.cache.backends.CacheBackend", {"backend": "cockatiel"})`. The kwargs dict is deep-copied per request so per-instance mutation can't leak across probes. Lists are accepted in addition to tuples so settings deserialized from YAML/JSON work without conversion.
+
+### Changed
+- **Backends are now referenced by dotted import path in `HEALTH_CHECK["SUBSETS"]`** instead of by bare class name resolved against an in-memory plugin registry. Each subset entry is either the full dotted path (e.g. `"health_check.contrib.db_heartbeat.backends.DatabaseHeartbeatCheck"`) or a `(path, kwargs)` tuple/list. Update every `SUBSETS` entry accordingly. `health_check` itself is the only app that needs to remain in `INSTALLED_APPS`; every contrib app entry can be removed.
+- `python manage.py health_check` now requires `--subset`; the no-argument "run every backend" mode has been removed.
+- `CheckMixin.filter_plugins(subset=None)` now raises `Http404` instead of returning every registered plugin. The mixin no longer exposes `plugins` / `_plugins` / `_errors` attributes — its only public surface is `filter_plugins(subset)`, `check(subset)`, and `run_check(subset)`.
+- The `HEALTHCHECK_CELERY_TIMEOUT` deprecation warning, previously emitted from `health_check.contrib.celery`'s `AppConfig.ready()`, now fires from `CeleryHealthCheck.check_status()` when the deprecated setting is in use (since `AppConfig.ready()` no longer exists).
+- Renamed `DatabaseHeartBeatCheck` → `DatabaseHeartbeatCheck` in `health_check.contrib.db_heartbeat.backends` ("Heartbeat" is one word). Update any direct imports and any `HEALTH_CHECK["SUBSETS"]` entries that reference the old class name.
+
+### Removed
+- `health_check.plugins` module and the global `plugin_dir` registry. There is no longer any in-memory list of "registered" backends; `HEALTH_CHECK["SUBSETS"]` is the single source of truth and Django's system check framework validates it at boot.
+- `AppConfig.ready()` registration hooks in every contrib/built-in app: `health_check.cache`, `health_check.storage`, `health_check.contrib.celery`, `celery_heartbeat`, `celery_ping`, `db_heartbeat`, `django_q`, `migrations`, `psutil`, `rabbitmq`, `redis`, `s3boto_storage`, `s3boto3_storage`. The `apps.py` files for those packages have been deleted; nothing in `INSTALLED_APPS` needs to change for the new mechanism, but you can drop the contrib entries since they no longer do anything.
+- The no-subset HTTP endpoint at `path("", MainView.as_view(), name="health_check_home")`. Every probe must target a named subset under `HEALTH_CHECK["SUBSETS"]` and use the `health_check_subset` URL (`/<mount>/<subset>/`).
+- The dynamic per-queue registration in `health_check.contrib.celery` (one `CeleryHealthCheck<Queue>` class per AMQP queue at boot). To check multiple queues, subclass `CeleryHealthCheck` once per queue (`class CeleryDefault(CeleryHealthCheck): queue = "default"`) and reference each subclass by dotted path.
+- The conditional `DiskUsage` / `MemoryUsage` registration in `health_check.contrib.psutil` (skip-if-`None` semantic). Inclusion is now explicit: list the dotted path in a subset to enable it, omit it to disable.
+- `health_check.db` app and its `DatabaseBackend` write-path check (the INSERT/UPDATE/DELETE probe against an internal `TestModel`). Use `DatabaseHeartbeatCheck` from `health_check.contrib.db_heartbeat` instead — it issues a `SELECT 1` (or `SELECT 1 FROM DUAL` on Oracle), requires no table, and works under conservative database-user permissions. To upgrade safely: while still on a prior version, run `python manage.py migrate db zero` to drop the `health_check_db_testmodel` table; then upgrade and remove `"health_check.db"` from `INSTALLED_APPS`.
+
 ## [0.1.0] - 2026-05-10
 
 ### Added

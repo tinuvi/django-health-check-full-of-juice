@@ -3,7 +3,6 @@ import tempfile
 import time
 from unittest.mock import MagicMock, patch
 
-from django.apps import apps
 from django.test import SimpleTestCase
 
 from health_check.contrib.celery_heartbeat import (
@@ -11,7 +10,6 @@ from health_check.contrib.celery_heartbeat import (
     DEFAULT_HEARTBEAT_INTERVAL,
     DEFAULT_HEARTBEAT_MAX_AGE,
 )
-from health_check.contrib.celery_heartbeat.apps import HealthCheckConfig
 from health_check.contrib.celery_heartbeat.backends import CeleryHeartbeatHealthCheck
 from health_check.contrib.celery_heartbeat.bootsteps import LivenessProbe
 
@@ -183,14 +181,6 @@ class TestLivenessProbeBootstep(SimpleTestCase):
         LivenessProbe._ensure_file(nested)
 
         self.assertTrue(os.path.exists(nested))
-
-
-class TestCeleryHeartbeatHealthCheckConfig(SimpleTestCase):
-    def test_apps(self):
-        self.assertEqual(HealthCheckConfig.name, "health_check.contrib.celery_heartbeat")
-
-        config = apps.get_app_config("celery_heartbeat")
-        self.assertEqual(config.name, "health_check.contrib.celery_heartbeat")
 
 
 class TestCeleryHeartbeatModuleDefaults(SimpleTestCase):

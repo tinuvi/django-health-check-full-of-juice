@@ -15,7 +15,7 @@ class SelectOne(Expression):
         return "SELECT 1 FROM DUAL", []
 
 
-class DatabaseHeartBeatCheck(BaseHealthCheckBackend):
+class DatabaseHeartbeatCheck(BaseHealthCheckBackend):
     """Health check that runs a simple SELECT 1; query to test if the database connection is alive."""
 
     def check_status(self):

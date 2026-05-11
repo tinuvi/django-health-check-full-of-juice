@@ -2,54 +2,91 @@ import copy
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
+from django.core.exceptions import ImproperlyConfigured
 from django.db import connections
 from django.http import Http404
+from django.utils.module_loading import import_string
 
+from health_check.backends import BaseHealthCheckBackend
 from health_check.conf import get_setting
 from health_check.exceptions import ServiceWarning
-from health_check.plugins import plugin_dir
+
+
+def resolve_backend(dotted_path):
+    """Import and validate a dotted path pointing at a ``BaseHealthCheckBackend`` subclass."""
+    try:
+        cls = import_string(dotted_path)
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise ImproperlyConfigured(f"HEALTH_CHECK SUBSETS: cannot import backend {dotted_path!r}: {exc}") from exc
+    if not isinstance(cls, type) or not issubclass(cls, BaseHealthCheckBackend):
+        raise ImproperlyConfigured(f"HEALTH_CHECK SUBSETS: {dotted_path!r} is not a subclass of BaseHealthCheckBackend")
+    return cls
+
+
+def parse_subset_entry(entry):
+    """
+    Normalize one ``HEALTH_CHECK["SUBSETS"][name]`` entry to ``(dotted_path, kwargs)``.
+
+    Accepted shapes:
+      - ``"my.module.Backend"`` (zero-arg construction)
+      - ``("my.module.Backend", {"alias": "replica"})`` or its list equivalent
+        (``Backend(**kwargs)`` construction)
+
+    Raises ``ImproperlyConfigured`` on any other shape.
+    """
+    if isinstance(entry, str):
+        return entry, {}
+    if isinstance(entry, (tuple, list)):
+        if len(entry) != 2:
+            raise ImproperlyConfigured(
+                f"HEALTH_CHECK SUBSETS entry {entry!r} must be a 2-element (path, kwargs) sequence."
+            )
+        path, kwargs = entry
+        if not isinstance(path, str):
+            raise ImproperlyConfigured(
+                f"HEALTH_CHECK SUBSETS entry {entry!r}: first element must be a dotted-path string."
+            )
+        if not isinstance(kwargs, dict):
+            raise ImproperlyConfigured(
+                f"HEALTH_CHECK SUBSETS entry {entry!r}: second element must be a dict of keyword arguments."
+            )
+        return path, kwargs
+    raise ImproperlyConfigured(
+        f"HEALTH_CHECK SUBSETS entry {entry!r}: must be a dotted-path string or a (path, kwargs) sequence."
+    )
 
 
 class CheckMixin:
-    _errors = None
-    _plugins = None
-
-    @property
-    def errors(self):
-        if not self._errors:
-            self._errors = self.run_check()
-        return self._errors
-
-    def check(self, subset=None):
-        return self.run_check(subset=subset)
-
-    @property
-    def plugins(self):
-        if not plugin_dir._registry:
-            return OrderedDict({})
-
-        if not self._plugins:
-            registering_plugins = (
-                plugin_class(**copy.deepcopy(options)) for plugin_class, options in plugin_dir._registry
-            )
-            registering_plugins = sorted(registering_plugins, key=lambda plugin: plugin.identifier())
-            self._plugins = OrderedDict({plugin.identifier(): plugin for plugin in registering_plugins})
-        return self._plugins
+    # Instance-level cache so a single request that resolves the subset twice
+    # (run_check + get_context_data, or run_check + JSON render) sees the same
+    # plugin instances and therefore the same accumulated errors.
+    _plugin_cache = None
 
     def filter_plugins(self, subset=None):
         if subset is None:
-            return self.plugins
+            raise Http404("A subset name is required. The no-subset endpoint has been removed.")
 
-        health_check_subsets = get_setting("SUBSETS")
-        if subset not in health_check_subsets or not self.plugins:
+        if self._plugin_cache is None:
+            self._plugin_cache = {}
+        cached = self._plugin_cache.get(subset)
+        if cached is not None:
+            return cached
+
+        subsets = get_setting("SUBSETS") or {}
+        if subset not in subsets:
             raise Http404(f"Subset: '{subset}' does not exist.")
 
-        selected_subset = set(health_check_subsets[subset])
-        return {
-            plugin_identifier: v
-            for plugin_identifier, v in self.plugins.items()
-            if plugin_identifier in selected_subset
-        }
+        instances = []
+        for entry in subsets[subset]:
+            path, kwargs = parse_subset_entry(entry)
+            instances.append(resolve_backend(path)(**copy.deepcopy(kwargs)))
+        instances.sort(key=lambda plugin: plugin.identifier())
+        resolved = OrderedDict((plugin.identifier(), plugin) for plugin in instances)
+        self._plugin_cache[subset] = resolved
+        return resolved
+
+    def check(self, subset=None):
+        return self.run_check(subset=subset)
 
     def run_check(self, subset=None):
         errors = []

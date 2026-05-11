@@ -23,16 +23,6 @@ INSTALLED_APPS = (
     "django.contrib.sessions",
     "django.contrib.staticfiles",
     "health_check",
-    "health_check.cache",
-    "health_check.db",
-    "health_check.storage",
-    "health_check.contrib.celery",
-    "health_check.contrib.celery_heartbeat",
-    "health_check.contrib.celery_ping",
-    "health_check.contrib.db_heartbeat",
-    "health_check.contrib.django_q",
-    "health_check.contrib.migrations",
-    "health_check.contrib.s3boto_storage",
     "tests",
 )
 

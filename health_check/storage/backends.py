@@ -11,11 +11,15 @@ class StorageHealthCheck(BaseHealthCheckBackend):
     """
     Tests the status of a `StorageBackend`.
 
-    Can be extended to test any storage backend by subclassing:
+    Can be extended to test any storage backend by subclassing, then referencing
+    the subclass by dotted path in `HEALTH_CHECK["SUBSETS"]`:
 
+        # myproject/healthchecks.py
         class MyStorageHealthCheck(StorageHealthCheck):
-            storage = 'some.other.StorageBackend'
-        plugin_dir.register(MyStorageHealthCheck)
+            storage = "some.other.StorageBackend"
+
+        # settings.py
+        HEALTH_CHECK = {"SUBSETS": {"integrations": ["myproject.healthchecks.MyStorageHealthCheck"]}}
 
     storage must be either a string pointing to a storage class
     (e.g 'django.core.files.storage.FileSystemStorage') or a Storage instance.
