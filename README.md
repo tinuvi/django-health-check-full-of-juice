@@ -123,11 +123,10 @@ urlpatterns = [
 # settings.py
 HEALTH_CHECK = {
     "SUBSETS": {
-        # Crucial services the app needs to run.
+        # Crucial services the app literally cannot serve traffic without.
         "readiness": [
             "MigrationsHealthCheck",
             "DatabaseBackend",
-            "CacheBackend",
         ],
         # Everything readiness has, plus every other integration the app talks to.
         "integrations": [
@@ -142,6 +141,8 @@ HEALTH_CHECK = {
     },
 }
 ```
+
+Keep `readiness` to backends the app literally cannot function without — failing it pulls every pod out of the load balancer at once, so a non-critical hiccup (e.g. Redis) shouldn't be in there or you've turned a degraded-performance event into a full outage. `CacheBackend` lives in `integrations` only, on the assumption that sessions are stored in the database (Django's default, `django.contrib.sessions.backends.db`). If your project sets `SESSION_ENGINE = "django.contrib.sessions.backends.cache"` (or `cached_db`), users can't authenticate without the cache — move `CacheBackend` back into `readiness` for that project.
 
 If your project uses Django-Q instead of (or alongside) Celery, swap in or add `DjangoQClusterHealthCheck` to `integrations`. It reads the heartbeat the Django-Q sentinel publishes to its broker on every cycle, so the web tier can fail synthetic monitoring when the worker fleet stops broadcasting.
 
